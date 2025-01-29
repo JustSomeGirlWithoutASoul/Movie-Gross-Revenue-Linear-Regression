@@ -1,0 +1,374 @@
+---
+title: "STA302 Final Project"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+#	Preparation
+
+## Import Data
+
+```{r}
+install.packages("MASS")
+install.packages("carData")
+
+data <- read.csv ("movie_metadata.csv")
+nrow(data)
+```
+
+## data cleaning
+```{r}
+table(train_0$content_rating)
+summary(train_0$content_rating)
+
+dim(train_0)
+
+train_1 <- subset(as.data.frame(train_0), 
+              select = c(num_critic_for_reviews,imdb_score, actor_1_facebook_likes, cast_total_facebook_likes, facenumber_in_poster, duration, director_facebook_likes, movie_facebook_likes,gross, budget, content_rating ))
+
+
+train_1$content_rating <- ifelse(train_1$content_rating %in% c("R", "PG", "PG-13"), 
+                                 train_1$content_rating, 
+                                 "other")
+
+table(train_1$content_rating)
+dim(train_1)
+train_1 <- train_1[complete.cases(train_1),]
+summary(train_1)
+
+```
+
+## split data in half
+```{r}
+set.seed(42)
+s <- sample(1:nrow(data), 2521 , replace=F)
+train_0 <- data[s ,]
+test <- data[-s,]
+
+summary(train_0)
+summary(test)
+```
+
+
+# conducting regression
+```{r}
+model_1 <- lm(gross ~ num_critic_for_reviews+imdb_score+ actor_1_facebook_likes+ cast_total_facebook_likes + duration+ director_facebook_likes + movie_facebook_likes+ budget+ content_rating, data=train_1)
+
+summary(model_1)
+```
+
+# Model checking
+## Check conditions
+```{r}
+# conditional mean predictors
+pairs(train_1[, 1:7], 
+      main="Scatterplot Matrix of Variables")
+
+# conditional mean response
+plot(train_1$gross ~ fitted(model_1))
+
+# number_imdb <-lm(num_critic_for_reviews ~imdb_score,data=train_1 )
+# summary(number_imdb)
+# correlation_coefficient <- cor(train_1$num_critic_for_reviews, train_1$imdb_score, method="pearson")
+# print(correlation_coefficient)
+```
+### Check assumptions 
+```{r}
+# residual vs. fitted
+plot(model_1$residuals ~ model_1$fitted.values,
+     xlab="Fitted Values",
+     ylab="Residuals",
+     main="Residuals vs. Fitted Values")
+```
+
+```{r}
+# residual vs predictors 
+
+# residual vs. num_critic_for_reviews
+plot(model_1$residuals ~ num_critic_for_reviews, data=train_1,
+     xlab="Number of Critics for Reviews",
+     ylab="Residuals",
+     main="Residuals vs. Number of Critics for Reviews")
+
+# residual vs. imdb_score
+plot(model_1$residuals ~ imdb_score, data=train_1,
+     xlab="IMDB Score",
+     ylab="Residuals",
+     main="Residuals vs. IMDB Score")
+
+# residual vs. duration
+plot(model_1$residuals ~ duration, data=train_1,
+     xlab="Duration (minutes)",
+     ylab="Residuals",
+     main="Residuals vs. Duration")
+
+# residual vs. budget
+plot(model_1$residuals ~ budget, data=train_1,
+     xlab="Budget",
+     ylab="Residuals",
+     main="Residuals vs. Budget")
+
+
+# residual vs. actor_1_facebook_likes
+plot(model_1$residuals ~ actor_1_facebook_likes, data=train_1,
+     xlab="Actor 1 Facebook Likes",
+     ylab="Residuals",
+     main="Residuals vs. Actor 1 Facebook Likes")
+
+
+# residual vs. content_rating
+boxplot(residuals(model_1) ~ train_1$content_rating,
+       xlab="Content Rating",
+       ylab="Residuals",
+       main="Boxplot of Residuals by Content Rating")
+```
+
+```{r}
+# qq plot
+qqnorm(model_1$residuals)
+qqline(model_1$residuals)
+hist(model_1$residuals)
+```
+due to the failure to satisfy the assumption, we drop the variable facenumber_in_poster. 
+
+```{r}
+#new data set
+train_2 <- subset(as.data.frame(train_1), 
+              select = c(num_critic_for_reviews,imdb_score, actor_1_facebook_likes, cast_total_facebook_likes, duration,gross, budget, content_rating ))
+summary(train_2)
+
+model_2 <- lm(gross ~ num_critic_for_reviews+imdb_score+actor_1_facebook_likes+cast_total_facebook_likes+ duration+budget+content_rating, data=train_2)
+summary(model_2)
+```
+
+### Box-cox transformation
+```{r}
+train_3 <- subset(as.data.frame(train_2), 
+              select = c(num_critic_for_reviews,imdb_score,duration,gross, budget))
+
+
+library(MASS)
+result<-boxcox(model_2)
+detach(package:MASS, unload=TRUE)
+
+library(car)
+boxcoxtable<- powerTransform(cbind(train_3[,1:5]))
+summary(boxcoxtable)
+
+```
+
+### Recheck the residual plot (for model 3)
+```{r}
+t_gross <- train_3$gross ** (1/4)
+t_imdb_score <- train_3$imdb_score**(2.6)
+t_duration <- train_3$duration**(-1/2)
+t_numcritic <- train_3$num_critic_for_reviews**(1/3)
+model_3 <- lm(t_gross ~ log(budget) + t_numcritic + t_duration + t_imdb_score +actor_1_facebook_likes+cast_total_facebook_likes+ content_rating,data = train_2)
+
+e_hat3 <- resid(model_3)
+y_hat3 <- fitted(model_3)
+
+plot(e_hat3 ~ y_hat3, xlab ="Fitted Values", ylab="Residuals")
+plot(e_hat3 ~ t_duration,xlab ="transformed(durations)", ylab = "Residuals")
+plot(e_hat3 ~ t_imdb_score,xlab ="transformed(imdb_score)", ylab = "Residuals")
+plot(e_hat3 ~ t_numcritic,xlab ="transformed(number critic)", ylab = "Residuals")
+plot(e_hat3 ~ log(train_3$budget),xlab ="transformed(budget)", ylab = "Residuals")
+
+qqnorm(e_hat3);qqline(e_hat3)
+summary(model_3)
+
+library(car)
+vif(model_3)
+```
+
+Given that the VIF value of actor_1_facebook_likes and cast_total_facebook_likes are 9.702867 and 10.061221, we remove cast_total_facebook_likes from the model. 
+```{r}
+model_4 <- lm(t_gross ~ log(budget) + t_numcritic + t_duration + t_imdb_score +actor_1_facebook_likes + content_rating,data = train_2)
+vif(model_4)
+```
+
+### Outlier
+```{r}
+plot(model_4$residuals)
+
+#find outlier
+r_i <- rstandard(model_4) 
+print("outliers (large)")
+which(rstandard(model_4) > 4 | rstandard(model_4) < -4)
+
+```
+
+```{r}
+data_outlier <- train_2[-c(2335, 2989, 3860, 2158, 2698, 3304), ]
+model_4 <- lm(t_gross ~ log(budget) + t_numcritic + t_duration + t_imdb_score +actor_1_facebook_likes + content_rating,data = data_outlier)
+
+```
+
+### Leverage
+```{r}
+leverages <- hatvalues(model_4)
+n <- nrow(train_3) 
+p <- length(coef(model_4))
+threshold <- (2 * p) / n
+high_leverage_points <- which(leverages > threshold)
+print(high_leverage_points)
+length(high_leverage_points)
+```
+
+### Influential point 
+```{r}
+# Cook's D (on all fitted values)
+di <- cooks.distance(model_4)
+cutoff_di <- qf(0.5, 7, 3873)
+which(di > cutoff_di)
+
+# DFFITS (on individual fitted value)
+dffits <- dffits(model_4)
+cutoff_dffits <- 2*sqrt(p/n)
+which(abs(dffits)>cutoff_dffits)
+
+# DFBETAS (on individual coefficient)
+dfbetas <- dfbetas(model_4)
+dim(dfbetas)
+
+cutoff_dfbetas <- 2/sqrt(3880)
+which(abs(dfbetas[,1]) > cutoff_dfbetas) ##beta0
+which(abs(dfbetas[,2]) > cutoff_dfbetas) ##beta1
+which(abs(dfbetas[,3]) > cutoff_dfbetas) ##beta2
+which(abs(dfbetas[,4]) > cutoff_dfbetas) ##beta3
+which(abs(dfbetas[,5]) > cutoff_dfbetas) ##beta4
+which(abs(dfbetas[,6]) > cutoff_dfbetas) ##beta5
+which(abs(dfbetas[,7]) > cutoff_dfbetas) ##beta6
+which(abs(dfbetas[,8]) > cutoff_dfbetas) ##beta7
+which(abs(dfbetas[,9]) > cutoff_dfbetas) ##beta8
+```
+
+
+## Model selection
+### ANOVA and t-test
+```{r}
+anova(model_4)
+summary(model_4)
+```
+
+The p-value of t-duration and actor_1_facebook_likes are larger than 0.05. Therefore, we temporarily drop them in the new model.
+### Partial f-test
+```{r}
+model_5 <- lm(t_gross ~ log(budget) + t_numcritic + t_imdb_score + content_rating,data = train_2)
+anova(model_5, model_4)
+```
+The Partial F-test results with p-values of 0.6645 and 0.5146 suggest that the additional variables in model_4 do not significantly improve the model fit compared to model_5.
+
+### Adjusted R^2
+```{r}
+summary(model_4)
+summary(model_5)
+```
+
+### AIC, BIC
+```{r}
+AIC(model_4)
+BIC(model_4)
+
+AIC(model_5)
+BIC(model_5)
+```
+\newpage
+
+## Model validation
+### Fit the final model in the test data set
+```{r}
+test <- na.omit(test) # clean the data set
+test$content_rating <- ifelse(test$content_rating %in% c("R", "PG", "PG-13"), 
+                                 test$content_rating, 
+                                 "other")
+
+
+test$t_gross <- test$gross ** (1/4)
+test$t_budget <- log(test$budget)
+test$t_numcritic <- test$num_critic_for_reviews ** (1/3)
+test$t_imdb_score <- test$imdb_score ** (2.6)
+
+model_test <- lm(t_gross ~ t_budget + t_numcritic + t_imdb_score + content_rating, data=test)
+summary(model_test)
+```
+### Check conditions 
+```{r}
+# conditional mean predictors
+predictor_vars <- test[, c("t_budget", "t_numcritic", "t_imdb_score")] # select only the numeric predictor variables from our dataset
+pairs(predictor_vars) # use pairs() to create the scatterplot matrix
+
+# conditional mean response
+plot(test$t_gross ~ fitted(model_test))
+```
+### Check assumptions
+```{r}
+# useful values
+e_hat_test <- resid(model_test)
+y_hat_test <- fitted(model_test)
+
+# residual vs fitted 
+plot(e_hat_test ~ y_hat_test, xlab ="Fitted Values", ylab="Residuals")
+
+# residual vs predictors
+plot(e_hat_test ~ test$t_budget,xlab ="transformed(budget)", ylab = "Residuals")
+plot(e_hat_test ~ test$t_numcritic,xlab ="transformed(number of critic)", ylab = "Residuals")
+plot(e_hat_test ~ test$t_imdb_score,xlab ="transformed(imdb score)", ylab = "Residuals")
+boxplot(residuals(model_1) ~ train_1$content_rating,
+       xlab="Content Rating",
+       ylab="Residuals",
+       main="Boxplot of Residuals by Content Rating")
+
+# qq plot
+qqnorm(e_hat_test)
+qqline(e_hat_test)
+```
+### Check multicollinearity 
+```{r}
+vif(model_test)
+```
+### Problematic observations
+```{r}
+# useful values:
+n <- nrow(test)
+p <- 5 # 5 is used here instead of length(coef(model_test))-1 b/c it counts all the sub categories within content_rating as predictors too
+
+# leverage
+h_cut <- 2*(p+1)/n 
+h_ii <- hatvalues(model_test) 
+print("high leverage")
+which(h_ii > h_cut)
+
+# outlier
+r_i <- rstandard(model_test) 
+print("outliers (large)")
+which(rstandard(model_test) > 4 | rstandard(model_test) < -4)
+
+# Cook's Distance
+D_cut <- qf(0.5, p+1, n-p-1) 
+D_i <- cooks.distance(model_test) 
+print("Cooks")
+which(cooks.distance(model_test) > D_cut)
+
+# DFFITS
+fits_cut <- 2*sqrt((p+1)/n)
+dffits_i <- dffits(model_test) 
+print("DFFITS")
+which(abs(dffits(model_test)) > fits_cut)
+
+# DFBETAS
+beta_cut <- 2/sqrt(n)
+dfbetas_i <- dfbetas(model_test)
+for(i in 1:(p+1)){
+print(paste0("Beta ", i-1))
+print(which(abs(dfbetas(model_test)[,i]) > beta_cut)) }
+```
+\newpage
